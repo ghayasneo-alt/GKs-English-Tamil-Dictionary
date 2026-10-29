@@ -1,0 +1,59 @@
+name: Build GK's English Tamil Dictionary APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ---- 1. Collocations from the scanned PDF (optional; cached, runs once) ----
+      - name: Restore OCR cache
+        uses: actions/cache@v4
+        with:
+          path: tools/out/collocations.jsonl
+          key: ocr-${{ hashFiles('tools/source/Dictionary.pdf', 'tools/ocr_collocations.py') }}
+
+      - name: OCR Dictionary.pdf (only if the PDF is in the repo and no cache/file exists)
+        run: |
+          if [ -f tools/source/Dictionary.pdf ] && [ ! -f tools/out/collocations.jsonl ]; then
+            sudo apt-get update
+            sudo apt-get install -y tesseract-ocr poppler-utils
+            python tools/ocr_collocations.py tools/source/Dictionary.pdf tools/out/collocations.jsonl
+          else
+            echo "Skipping OCR (no PDF, or collocations.jsonl already present)."
+          fi
+
+      # ---- 2. English dictionary database (WordNet) ----
+      - name: Build dictionary.db
+        run: |
+          pip install nltk
+          python tools/build_dictionary_db.py
+
+      # ---- 3. Android APK ----
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GKs-English-Tamil-Dictionary-apk
+          path: app/build/outputs/apk/debug/*.apk
